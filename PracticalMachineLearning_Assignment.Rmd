@@ -1,0 +1,233 @@
+---
+title: "Machine Learning Assignment"
+output: html_document
+---
+
+
+This document contains an overview of the steps taken in completing the Practical Machine Learning assignment.  The code that was run to obtain the final predictions is included in the appendix.
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(width=75)
+```
+# Approach Taken
+
+
+
+## Error Rate
+
+
+
+```{r message=FALSE, warning=FALSE, result=FALSE, echo=FALSE}
+library(caret)
+library(dplyr)
+library(ggplot2)
+library(rpart)
+library(glmnet)
+library(randomForest)
+```
+
+
+```{r data_download, warning=FALSE, cache=TRUE, echo=FALSE}
+#  fileUrl <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+# download.file(fileUrl,destfile="./pml-training.csv",method="curl")
+# fileUrl <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+# download.file(fileUrl,destfile="./pml-testing.csv",method="curl")
+# list.files(".")
+
+```
+
+```{r data_cleanup, warning=FALSE, cache=TRUE, echo=FALSE}
+train <- read.csv("data/pml-training.csv", stringsAsFactors = FALSE)
+class_list <- lapply(train, class)
+col_classes <- sapply(class_list, '[[', 1)
+# train$kurtosis_picth_belt[749]
+chr_ind <- which(col_classes == "character")
+chr_ind <- chr_ind[5:length(chr_ind)-1]  # Only change the measurements to numeric
+train[chr_ind] <- train[chr_ind] <- sapply(train[chr_ind], function(x) as.numeric(as.character(x)))
+train$user_name <- as.factor(train$user_name)
+train$new_window <- as.factor(train$new_window)
+
+```
+Accuracy was selected as the error rate to evaluate the performance of the model.  
+
+## Benchmark Error Rates
+After loading the training set data, the classe variable was identified as the outcome and it was noted that the benchmark success probability of 28% could be achieved by simply recording all outcomes as classe A.  Randomly selecting an outcome would have an expected 20% probability of success.  The proportions of each classe value are shown below.
+
+```{r warning=FALSE, cache=TRUE, echo=FALSE}
+#Obtain the benchmarks for the data in terms of modelling and assuming all 
+# results are a single class
+table(train$classe)/dim(train)[1]
+```
+
+## Training and Test Data
+
+```{r warning=FALSE, echo=FALSE, results=FALSE}
+
+# Remove the near zero variables that do not have sufficient variance to contribute to any 
+# model.
+near_zero_var <-  nearZeroVar(train[,-160])
+train <- train[,-near_zero_var]
+
+#Check which fields contain NAs and which proportion of the total rows.
+has_na <- which(sapply(train[], function(x) sum(is.na(x))) > 0)
+prop_nas <- sapply(train[has_na], function(x) sum(is.na(x))/dim(train)[1])
+
+# Nearly all of the values are NA so remove these covariates from the training data
+train <- train[,-has_na]
+
+```
+In order that an out of sample error rate could be estimated, the training data was split into a training and test set using the createDataPartition function in the Caret package with 60% of the data being assigned to the training subset.
+
+##  Feature Selection
+
+ Name, timestamp and window data were unrelated to the problem and excluded from the features.  This was confirmed by plotting the variables and this demonstrated the relationship was with Name and not classe.  
+ 
+ This left the numeric variables as potential features for inclusion in the model build.  Near zero variance variables were identified using the nearZeroVar function and excluded from the features list. Variables containing NAs were identified.  In all cases, the proportion of NAs for these variables were greater than 96% so all of those features were excluded from the features list.
+ 
+ The following final feature list resulted:
+ 
+ ```{r warning=FALSE, echo=FALSE, tidy=TRUE}
+set.seed(1234)
+outcomeName <- 'classe'
+predictorsNames <- names(train)[-c(1:7, 59)]
+
+trainData <- createDataPartition(train[,"classe"], p = 0.6, list=FALSE)
+train <- train[trainData,]
+test <- train[-trainData,]
+```
+
+
+ ```{r echo=FALSE, tidy=TRUE }
+belt <- predictorsNames[1:12]
+belt[13] <- ""
+arm <- predictorsNames[13:25]
+dumbbell <- predictorsNames[26:38]
+forearm <- predictorsNames[39:51]
+namesMat <- cbind(belt, arm, dumbbell, forearm)
+knitr::kable(namesMat, padding=10)
+```
+
+ 
+## Model Selection
+ 
+An ensemble method of generalised linear modelling (glmnet) followed by generalised boosted regression (gbm)  was used initially as a way of trying to better understand the content of the lectures and it also served as a comparison for accuracy measurements.  The accuracy value returned as the out of sample error estimate on the testing subset of the original training data was 66%. 
+
+Given the known accuracy of Random Forests as a modelling method, this was selected as the second model build.  It was not a big problem that the speed of the Random Forest model would be poor nor that the models would not be easy to interpret since the reputation for accuracy was a big advantage.  K-fold cross validation was included in the model build process to reduce over-fitting.
+
+### Train Control
+
+The following trControl was defined for the model training to implement 5-fold cross validation:
+```{r warning=FALSE, message=FALSE, results=FALSE}
+rfControl <- trainControl(method='cv', number=5, classProbs=TRUE)
+```
+
+### Model Train
+
+The following function call was made on the training data to establish the optimum model parameters:
+```{r warning=FALSE, message=FALSE, results=FALSE, cache=TRUE}
+mod_rf <- train(train[,predictorsNames], train$classe, trControl=rfControl)
+```
+
+## Out of Sample Error Estimate
+
+The out of sample error was estimated using the following call using the **test** subset of the training dataset:
+
+```{r warning=FALSE, message=FALSE}
+confusionMatrix(test$classe, predict(mod_rf, test[,predictorsNames]))
+```
+
+As can be seen this produced an out of sample estimate of accuracy equal to 1.   
+
+## Test Set Predictions
+
+```{r warning=FALSE, echo=FALSE}
+set.seed(1234)
+
+vtest <- read.csv("data/pml-testing.csv", stringsAsFactors = FALSE)
+class_list <- lapply(train, class)
+col_classes <- sapply(class_list, '[[', 1)
+vtest <- vtest[,-near_zero_var]
+vtest <- vtest[,-has_na]
+```
+
+The assignment test set was loaded and the same set of features selected to use as input to the model.  The following prediction command was run to obtain the predicted classe outcomes:
+
+```{r warning=FALSE, message=FALSE}
+vtestPred <- predict(mod_rf, vtest[,predictorsNames])
+```
+
+All predicted outcomes were correct according to the test set quiz.
+
+# Appendix
+
+## Example Variable Plot
+
+The density plot of the data shows each is skewed with 2 peaks.
+
+```{r warning=FALSE, echo=FALSE}
+ggplot(train, aes(x=magnet_dumbbell_x)) + geom_density(aes(colour=classe)) +
+    ggtitle("Example Density Plot of Variable x_magnet_dumbbell_x")
+```
+
+## Entire Code
+
+```{r warning=FALSE, message=FALSE, results=FALSE, cache=TRUE}
+library(caret)
+library(dplyr)
+library(ggplot2)
+library(randomForest)
+
+train <- read.csv("data/pml-training.csv", stringsAsFactors = FALSE)
+class_list <- lapply(train, class)
+col_classes <- sapply(class_list, '[[', 1)
+chr_ind <- which(col_classes == "character")
+chr_ind <- chr_ind[5:length(chr_ind)-1]  # Ensure measurements are numeric
+train[chr_ind] <- train[chr_ind] <- sapply(train[chr_ind], function(x) as.numeric(as.character(x)))
+
+#
+#  Feature Selection
+#
+
+# Remove the near zero variables that do not have sufficient variance to contribute to any 
+# model.
+near_zero_var <-  nearZeroVar(train[,-160])
+train <- train[,-near_zero_var]
+
+#Check which fields contain NAs and which proportion of the total rows.
+has_na <- which(sapply(train[], function(x) sum(is.na(x))) > 0)
+prop_nas <- sapply(train[has_na], function(x) sum(is.na(x))/dim(train)[1])
+
+# Nearly all of the values are NA so remove these covariates from the training data
+train <- train[,-has_na]
+
+set.seed(1234)
+outcomeName <- 'classe'
+predictorsNames <- names(train)[-c(1:7, 59)]
+
+#
+# Split into training and testing sets
+#
+trainData <- createDataPartition(train[,"classe"], p = 0.6, list=FALSE)
+train <- train[trainData,]
+test <- train[-trainData,]
+
+#
+#  Model Build
+#
+rfControl <- trainControl(method='cv', number=5, classProbs=TRUE)
+mod_rf <- train(train[,predictorsNames], train$classe, trControl=rfControl)
+
+#
+#  Out of Sample Error Estimate
+#
+confusionMatrix(test$classe, predict(mod_rf, test[,predictorsNames]))
+
+#
+# Predictions on validation test set.
+#
+vtest <- read.csv("data/pml-testing.csv", stringsAsFactors = FALSE)
+vtest <- vtest[,-near_zero_var]
+vtest <- vtest[,-has_na]
+vtestPred <- predict(mod_rf, vtest[,predictorsNames])
+
+```
