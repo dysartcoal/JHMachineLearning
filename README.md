@@ -1,2 +1,6 @@
 # JHMachineLearning
-Files related to the Johns Hopkins Practical Machine Learning course.
+
+HTML Assignment is at http://dysartcoal.github.io/projects/JHPracticalMachineLearning/PracticalMachineLearning_Assignment.html.
+
+The source markdown and html files are included here in this repository.
+
